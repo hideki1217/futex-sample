@@ -37,7 +37,7 @@ struct task {
   void (*func)(int, void *);
 };
 
-#define QUEUE_SIZE 1024
+#define QUEUE_SIZE 128
 struct queue {
   struct task tasks[QUEUE_SIZE];
   atomic_int alive;
@@ -118,7 +118,7 @@ int queue_join(struct queue *q) {
   }
 }
 
-int queue_kill(struct queue* q) {
+int queue_kill(struct queue *q) {
   atomic_store(&q->alive, 0);
 
   atomic_fetch_add(&q->consumer, 1);
@@ -129,8 +129,9 @@ int queue_kill(struct queue* q) {
 
 struct queue q;
 
-#define NUM_CONSUMER 3
-const char *colors[NUM_CONSUMER] = {RED, BLUE, GREEN};
+#define PRODUCER_NUM 2
+#define CONSUMER_NUM 3
+const char *colors[CONSUMER_NUM] = {RED, BLUE, GREEN};
 
 atomic_int stop_flag = 0;
 static void *consumer_main(void *arg) {
@@ -150,7 +151,7 @@ static void *consumer_main(void *arg) {
   return NULL;
 }
 
-void task_func(int thread_id, void *arg) {
+static void task_func(int thread_id, void *arg) {
   int task_id = (long)arg;
 
   TRACE(colors[thread_id], "(task_id: %d) > > >\n", task_id);
@@ -160,20 +161,17 @@ void task_func(int thread_id, void *arg) {
   TRACE(colors[thread_id], "< < < (task_id: %d)\n", task_id);
 }
 
-int main(int argc, const char **argv) {
-  int status;
-  pthread_t consumers[NUM_CONSUMER];
+static void *producer_main(void *arg) {
+  int thread_id = (long)arg;
+  struct task task;
 
-  queue_init(&q);
+  TRACE(RESET, "Producer %d start...\n", thread_id);
 
-  for (int i = 0; i < NUM_CONSUMER; ++i) {
-    pthread_create(&consumers[i], NULL, consumer_main, (void *)(long)i);
-  }
-
-  for (int i = 0; i < 100; ++i) {
+  for (int i = 0; i < 256; ++i) {
+    int task_id = i + (1 << (thread_id * 10));
     struct task task = {
-        .task_id = i,
-        .func_arg = (void *)(long)i,
+        .task_id = task_id,
+        .func_arg = (void *)(long)task_id,
         .func = task_func,
     };
     queue_push(&q, task);
@@ -181,10 +179,35 @@ int main(int argc, const char **argv) {
     usleep(rand() % (1000 * 10));
   }
 
+  TRACE(RESET, "Producer %d stop\n", thread_id);
+
+  return NULL;
+}
+
+int main(int argc, const char **argv) {
+  int status;
+  pthread_t consumers[CONSUMER_NUM];
+  pthread_t producers[PRODUCER_NUM];
+
+  queue_init(&q);
+
+  for (int i = 0; i < PRODUCER_NUM; ++i) {
+    pthread_create(&producers[i], NULL, producer_main, (void *)(long)i);
+  }
+
+  for (int i = 0; i < CONSUMER_NUM; ++i) {
+    pthread_create(&consumers[i], NULL, consumer_main, (void *)(long)i);
+  }
+
+  for (int i = 0; i < PRODUCER_NUM; i++) {
+    pthread_join(producers[i], NULL);
+  }
+
   queue_join(&q);
   atomic_store(&stop_flag, 1);
   queue_kill(&q);
-  for (int i = 0; i < NUM_CONSUMER; i++) {
+
+  for (int i = 0; i < CONSUMER_NUM; i++) {
     pthread_join(consumers[i], NULL);
   }
 
