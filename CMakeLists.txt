@@ -6,3 +6,4 @@ project(futex-sample C)
 
 add_executable(futex-sample-fork src/fork-ver.c)
 add_executable(futex-sample-pthread src/pthread-ver.c)
+add_executable(futex-sample-mutex src/mutex.c)
